@@ -233,6 +233,7 @@ const InfiniteScene = ({ messages, onOrbClick }) => (
 const UIOverlay = ({ onAddMessage, selectedMsg, onCloseSelected }) => {
   const [inputText, setInputText] = useState('');
   const [isInputFocused, setInputFocused] = useState(false);
+  const [isHolding, setHolding] = useState(false);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -240,6 +241,18 @@ const UIOverlay = ({ onAddMessage, selectedMsg, onCloseSelected }) => {
       onAddMessage(inputText);
       setInputText('');
       soundEngine.playDecrypt();
+    }
+  };
+
+  const handleHoldStart = () => {
+    setHolding(true);
+    soundEngine.playDecrypt();
+  };
+
+  const handleHoldEnd = () => {
+    if (isHolding) {
+      setHolding(false);
+      onCloseSelected();
     }
   };
 
@@ -281,66 +294,61 @@ const UIOverlay = ({ onAddMessage, selectedMsg, onCloseSelected }) => {
         </form>
       </div>
 
-      {/* Selected Message Panel - Right Side */}
+      {/* Central Decryption Modal */}
       <AnimatePresence>
         {selectedMsg && (
           <motion.div
-            initial={{ x: 400, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: 400, opacity: 0 }}
-            className="absolute top-0 right-0 h-full w-full md:w-96 bg-black/60 backdrop-blur-2xl border-l border-white/10 z-20 p-8 flex flex-col shadow-2xl"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) onCloseSelected();
+            }}
           >
-            <div className="flex justify-between items-center mb-8">
-              <h3 className="text-lg font-mono text-white/70 uppercase tracking-widest">Decrypted Data</h3>
-              <button
-                onClick={onCloseSelected}
-                className="p-2 hover:bg-white/10 rounded-full transition-colors text-white/50 hover:text-white"
-              >
-                <X size={24} />
-              </button>
-            </div>
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative w-full max-w-2xl bg-black/80 border border-white/10 rounded-3xl p-16 text-center select-none cursor-pointer shadow-2xl overflow-hidden"
+              onPointerDown={handleHoldStart}
+              onPointerUp={handleHoldEnd}
+              onPointerLeave={handleHoldEnd}
+              whileTap={{ scale: 0.98 }}
+            >
+              <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent pointer-events-none" />
 
-            <div className="flex-1 space-y-6 overflow-y-auto">
-              <div className="p-6 rounded-2xl bg-white/5 border border-white/10 relative overflow-hidden group">
-                <div className="absolute inset-0 bg-gradient-to-br from-purple-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                <p className="text-2xl font-light leading-relaxed relative z-10">"{selectedMsg.text}"</p>
+              <div className="relative z-10 flex flex-col items-center gap-8">
+                <Lock size={48} className={`text-white/20 transition-all duration-500 ${isHolding ? 'opacity-0 scale-50' : 'opacity-100 scale-100'}`} />
+
+                <motion.div
+                  animate={{ filter: isHolding ? 'blur(0px)' : 'blur(15px)', opacity: isHolding ? 1 : 0.5 }}
+                  transition={{ duration: 1.5, ease: "circOut" }}
+                  className="w-full"
+                >
+                  <p className="text-3xl md:text-4xl font-light leading-relaxed text-white tracking-wide">
+                    &quot;{selectedMsg.text}&quot;
+                  </p>
+                </motion.div>
+
+                <motion.div
+                  animate={{ opacity: isHolding ? 0 : 1, y: isHolding ? 20 : 0 }}
+                  className="flex flex-col items-center gap-2"
+                >
+                  <p className="text-sm font-bold tracking-[0.3em] text-purple-400 uppercase animate-pulse">
+                    Hold to Decrypt
+                  </p>
+                  <div className="w-12 h-1 bg-white/10 rounded-full overflow-hidden">
+                    <motion.div
+                      className="h-full bg-purple-500"
+                      initial={{ width: "0%" }}
+                      animate={{ width: "100%" }}
+                      transition={{ duration: 2, repeat: Infinity }}
+                    />
+                  </div>
+                </motion.div>
               </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="p-4 rounded-xl bg-white/5 border border-white/5">
-                  <span className="text-xs text-white/40 uppercase block mb-1">Resonance</span>
-                  <span className="text-lg font-mono text-purple-300">{(selectedMsg.encoded.hash % 1000).toString().padStart(4, '0')}Hz</span>
-                </div>
-                <div className="p-4 rounded-xl bg-white/5 border border-white/5">
-                   <span className="text-xs text-white/40 uppercase block mb-1">Stability</span>
-                   <div className="flex items-center gap-2">
-                     <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden">
-                       <div className="h-full bg-blue-500" style={{ width: `${(1 - selectedMsg.encoded.distort) * 100}%` }} />
-                     </div>
-                   </div>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-xs text-white/40 uppercase">Visual Signature</p>
-                <div className="flex items-center gap-2 text-sm text-white/60 font-mono">
-                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: selectedMsg.encoded.color }} />
-                  {selectedMsg.encoded.color} / {selectedMsg.encoded.shape}
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-8 pt-8 border-t border-white/10">
-              <button
-                onClick={() => {
-                    soundEngine.playResonate();
-                }}
-                className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all uppercase tracking-widest text-sm font-medium flex items-center justify-center gap-2 group"
-              >
-                <RotateCcw size={16} className="group-hover:rotate-180 transition-transform duration-500" />
-                Resonate
-              </button>
-            </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -437,6 +445,7 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [selectedMsg, setSelectedMsg] = useState(null);
   const [identity, setIdentity] = useState(null);
+
 
   const addMessage = (text, randomPos = false, isNew = true) => {
     const encoded = encodeToVisuals(text);
