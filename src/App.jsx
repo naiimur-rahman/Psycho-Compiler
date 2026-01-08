@@ -1,55 +1,28 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Stars, MeshDistortMaterial, Float, Environment } from '@react-three/drei';
-import { EffectComposer, Bloom, Noise, Vignette } from '@react-three/postprocessing';
+import { OrbitControls, Stars, MeshDistortMaterial, Float, Environment, Text } from '@react-three/drei';
+import { EffectComposer, Bloom } from '@react-three/postprocessing'; // NEW: For the neon glow
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Send, Lock, Unlock, Zap } from 'lucide-react';
+import { Lock, Unlock, X, Send } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import * as THREE from 'three';
 
-// --- 1. PROCEDURAL GENERATION ENGINE ---
-
-const cyrb128 = (str) => {
-    let h1 = 1779033703, h2 = 3144134277, h3 = 1013904242, h4 = 2773480762;
-    for (let i = 0, k; i < str.length; i++) {
-        k = str.charCodeAt(i);
-        h1 = h2 ^ Math.imul(h1 ^ k, 597399067);
-        h2 = h3 ^ Math.imul(h2 ^ k, 286986028);
-        h3 = h4 ^ Math.imul(h3 ^ k, 951274213);
-        h4 = h1 ^ Math.imul(h4 ^ k, 2716044179);
-    }
-    return [(h1^h2^h3^h4) >>> 0];
-};
-
-const generateSignature = (text) => {
-    const seed = cyrb128(text)[0];
-    const hue = seed % 360;
-    const saturation = 60 + (seed % 40);
-    const lightness = 40 + (seed % 30);
-    const color = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
-    
-    // Available shapes
-    const shapes = ['sphere', 'icosahedron', 'octahedron', 'torusKnot', 'dodecahedron'];
-    const shape = shapes[seed % shapes.length];
-    
-    const roughness = (seed % 10) / 10; 
-    const metalness = ((seed % 20) / 20) + 0.2;
-    const distort = ((seed % 50) / 100) + 0.1;
-    const baseFreq = 200 + (seed % 600);
-    
-    return { color, shape, roughness, metalness, distort, baseFreq, seed };
-};
-
-// --- 2. AUDIO ENGINE ---
+// --- AUDIO ENGINE (Unchanged, functionally sound) ---
 class SoundEngine {
-  constructor() { this.ctx = null; }
-  
-  init() {
-    if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-    if (this.ctx.state === 'suspended') this.ctx.resume();
+  constructor() {
+    this.ctx = null;
   }
 
-  playTone(freq, type, duration, vol = 0.1) {
+  init() {
+    if (!this.ctx) {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (this.ctx.state === 'suspended') {
+      this.ctx.resume();
+    }
+  }
+
+  playTone(freq, type = 'sine', duration = 0.5, vol = 0.1) {
     if (!this.ctx) return;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
@@ -64,238 +37,256 @@ class SoundEngine {
     osc.stop(this.ctx.currentTime + duration);
   }
 
-  playUnique(signature) {
-    if (!this.ctx) this.init();
-    const types = ['sine', 'triangle', 'sawtooth', 'square'];
-    const type = types[signature.seed % types.length];
-    this.playTone(signature.baseFreq, type, 0.4, 0.1);
-    
-    setTimeout(() => {
-        this.playTone(signature.baseFreq * 1.5, 'sine', 0.6, 0.05);
-    }, 100);
+  playHover(encoded) {
+    if (!this.ctx) return;
+    const isAngry = encoded.color === '#ef4444';
+    const isCalm = encoded.color === '#3b82f6';
+    const isSecret = encoded.color === '#22c55e';
+    let freq = 440, type = 'sine';
+    if (isAngry) { freq = 150; type = 'sawtooth'; }
+    else if (isCalm) { freq = 600; type = 'sine'; }
+    else if (isSecret) { freq = 800; type = 'square'; }
+    else { freq = 300 + (encoded.hash % 500); }
+    this.playTone(freq, type, 0.3, 0.05);
   }
 
-  playAmbient() {
-      if(!this.ctx) return;
-      this.playTone(100, 'sine', 2, 0.02);
+  playDecrypt() {
+    if (!this.ctx) return;
+    for(let i=0; i<10; i++) {
+        setTimeout(() => this.playTone(1000 + Math.random() * 2000, 'square', 0.05, 0.02), i * 50);
+    }
+  }
+
+  playResonate() {
+    if (!this.ctx) return;
+    [261.63, 329.63, 392.00, 523.25].forEach((note, i) => {
+        setTimeout(() => this.playTone(note, 'sine', 2.0, 0.1), i * 100);
+    });
   }
 }
+
 const soundEngine = new SoundEngine();
 
-// --- 3. SCRAMBLE TEXT EFFECT ---
-const ScrambleText = ({ text, revealed }) => {
-    const [display, setDisplay] = useState("");
-    const chars = "!@#$%^&*()_+-=[]{}|;:,.<>?/~";
-    
-    useEffect(() => {
-        let interval;
-        if (revealed) {
-            let iteration = 0;
-            interval = setInterval(() => {
-                setDisplay(text.split("").map((letter, index) => {
-                    if (index < iteration) return text[index];
-                    return chars[Math.floor(Math.random() * chars.length)];
-                }).join(""));
-                
-                if (iteration >= text.length) clearInterval(interval);
-                iteration += 1 / 3;
-            }, 30);
-        } else {
-            setDisplay(Array(Math.min(text.length, 20)).fill(0).map(() => chars[Math.floor(Math.random() * chars.length)]).join(""));
-        }
-        return () => clearInterval(interval);
-    }, [revealed, text]);
+// --- ENCODER LOGIC (Unchanged) ---
+const encodeToVisuals = (text) => {
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    hash = text.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const isAngry = /angry|hate|bad|mad|fire|red|sharp|pain/.test(text.toLowerCase());
+  const isCalm = /calm|peace|blue|water|cool|love|soft|smooth/.test(text.toLowerCase());
+  const isSecret = /secret|hidden|psst|code|mystery|unknown/.test(text.toLowerCase());
 
-    return <span className="font-mono">{display}</span>;
+  let color = '#a855f7', distort = 0.3, speed = 1.5, shape = 'sphere';
+  let pattern = { wireframe: false, roughness: 0.2, metalness: 0.8 };
+
+  if (isAngry) {
+    color = '#ef4444'; distort = 0.8; speed = 4; shape = 'icosahedron';
+    pattern = { wireframe: true, roughness: 0.1, metalness: 0.5 };
+  } else if (isCalm) {
+    color = '#3b82f6'; distort = 0.2; speed = 0.8; shape = 'sphere';
+    pattern = { wireframe: false, roughness: 0.0, metalness: 0.1 };
+  } else if (isSecret) {
+    color = '#22c55e'; distort = 0.6; speed = 2; shape = 'torusKnot';
+    pattern = { wireframe: true, roughness: 0.5, metalness: 0.9 };
+  } else {
+    const colors = ['#f472b6', '#c084fc', '#fbbf24', '#60a5fa'];
+    color = colors[Math.abs(hash) % colors.length];
+    const shapes = ['sphere', 'octahedron', 'dodecahedron', 'tetrahedron'];
+    shape = shapes[Math.abs(hash) % shapes.length];
+    pattern.wireframe = Math.abs(hash) % 3 === 0;
+  }
+  return { color, distort, speed, hash, shape, pattern };
 };
 
-// --- 4. 3D SCENE & COMPONENTS ---
-
-// FIXED: Helper component to switch geometries correctly
-const GeometrySelector = ({ type }) => {
-    switch (type) {
-        case 'sphere': return <sphereGeometry args={[1, 64, 64]} />;
-        case 'icosahedron': return <icosahedronGeometry args={[1, 0]} />;
-        case 'octahedron': return <octahedronGeometry args={[1, 0]} />;
-        case 'dodecahedron': return <dodecahedronGeometry args={[1, 0]} />;
-        case 'torusKnot': return <torusKnotGeometry args={[0.6, 0.2, 100, 16]} />;
-        default: return <sphereGeometry args={[1, 64, 64]} />;
-    }
+// --- GEOMETRY CACHE (Optimization) ---
+// creating geometries inside the component causes re-instantiation on every render.
+const Geometries = {
+    sphere: <sphereGeometry args={[1, 64, 64]} />,
+    icosahedron: <icosahedronGeometry args={[1, 0]} />,
+    tetrahedron: <tetrahedronGeometry args={[1, 0]} />,
+    octahedron: <octahedronGeometry args={[1, 0]} />,
+    dodecahedron: <dodecahedronGeometry args={[1, 0]} />,
+    torusKnot: <torusKnotGeometry args={[0.6, 0.2, 100, 16]} />
 };
 
-const MessageOrb = ({ id, position, signature, text, onClick, isNew }) => {
-    const groupRef = useRef();
-    const meshRef = useRef();
-    const [hovered, setHover] = useState(false);
-    
-    const startPos = useRef(new THREE.Vector3(0, 0, 40));
-    // Ensure position is treated as a Vector3
-    const targetPos = useMemo(() => new THREE.Vector3(position[0], position[1], position[2]), [position]);
-    const progress = useRef(isNew ? 0 : 1);
+// --- 3D COMPONENTS ---
 
-    useFrame((state, delta) => {
-        // Animation Logic
+const MessageOrb = ({ id, position, encoded, text, onClick, resonating, isNew }) => {
+  const groupRef = useRef(); // Moves the whole system (travel animation)
+  const meshRef = useRef();  // Handles local rotation and scale (resonance)
+  const [hovered, setHover] = useState(false);
+  
+  // Animation State
+  const startPos = useRef(new THREE.Vector3(0, 0, 30)); 
+  const targetPos = useMemo(() => new THREE.Vector3(...position), [position]);
+  const progress = useRef(isNew ? 0 : 1);
+
+  useFrame((state, delta) => {
+    // 1. GLOBAL POSITIONING (Travel Logic)
+    if (groupRef.current) {
         if (progress.current < 1) {
-            progress.current += delta * 0.5;
+            progress.current += delta * 0.8; // Slightly faster travel
             if (progress.current > 1) progress.current = 1;
-            const ease = 1 - Math.pow(1 - progress.current, 3);
-            if(groupRef.current) groupRef.current.position.lerpVectors(startPos.current, targetPos, ease);
-        }
-
-        if (meshRef.current) {
-            meshRef.current.rotation.x += delta * 0.2;
-            meshRef.current.rotation.y += delta * 0.25;
             
-            const targetScale = hovered ? 1.4 : 1;
-            meshRef.current.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.1);
+            // Cubic ease-out
+            const t = progress.current;
+            const ease = 1 - Math.pow(1 - t, 3);
+            
+            groupRef.current.position.lerpVectors(startPos.current, targetPos, ease);
+        } else {
+             // Ensure exact placement
+             groupRef.current.position.lerp(targetPos, 0.1);
         }
-    });
+    }
 
-    const handlePointerOver = (e) => {
-        e.stopPropagation();
-        setHover(true);
-        soundEngine.playUnique(signature);
-        document.body.style.cursor = 'pointer';
-    };
+    // 2. MESH EFFECTS (Resonance & Hover)
+    if (meshRef.current) {
+        // Continuous rotation
+        meshRef.current.rotation.x += delta * 0.2;
+        meshRef.current.rotation.y += delta * 0.3;
 
-    const handlePointerOut = (e) => {
-        setHover(false);
-        document.body.style.cursor = 'auto';
-    };
+        // Scale Logic
+        let targetScale = hovered ? 1.4 : 1;
+        if (resonating) {
+            const pulse = 1 + Math.sin(state.clock.elapsedTime * 10) * 0.3;
+            targetScale = pulse * 1.5;
+        }
+        
+        meshRef.current.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.1);
+    }
+  });
 
-    return (
-        <group ref={groupRef} position={isNew ? [0,0,40] : position}>
-            <Float speed={2} rotationIntensity={0.5} floatIntensity={0.5}>
-                <mesh
-                    ref={meshRef}
-                    onClick={(e) => { e.stopPropagation(); onClick({ id, text, signature }); }}
-                    onPointerOver={handlePointerOver}
-                    onPointerOut={handlePointerOut}
-                >
-                    {/* FIXED: Using the selector component instead of a global object */}
-                    <GeometrySelector type={signature.shape} />
-                    
-                    <MeshDistortMaterial
-                        color={signature.color}
-                        distort={signature.distort}
-                        speed={2}
-                        roughness={signature.roughness}
-                        metalness={signature.metalness}
-                        toneMapped={false}
-                        emissive={signature.color}
-                        emissiveIntensity={hovered ? 2 : 0.5}
-                    />
-                </mesh>
-            </Float>
-        </group>
-    );
+  const handlePointerOver = () => {
+    setHover(true);
+    soundEngine.playHover(encoded);
+    document.body.style.cursor = 'pointer';
+  };
+
+  const handlePointerOut = () => {
+      setHover(false);
+      document.body.style.cursor = 'auto';
+  }
+
+  return (
+    // FIX: Group handles the "Travel" position. Float handles the "Idle" motion.
+    <group ref={groupRef} position={isNew ? [0,0,30] : position}>
+        <Float speed={2} rotationIntensity={0.5} floatIntensity={1} floatingRange={[-0.5, 0.5]}>
+            <mesh
+                ref={meshRef}
+                onClick={(e) => {
+                    e.stopPropagation();
+                    onClick({ id, text, encoded });
+                }}
+                onPointerOver={handlePointerOver}
+                onPointerOut={handlePointerOut}
+            >
+                {Geometries[encoded.shape] || Geometries.sphere}
+
+                <MeshDistortMaterial
+                    color={resonating ? '#ffffff' : encoded.color}
+                    distort={encoded.distort}
+                    speed={encoded.speed}
+                    roughness={encoded.pattern.roughness}
+                    metalness={encoded.pattern.metalness}
+                    wireframe={encoded.pattern.wireframe}
+                    // Increased toneMapped to false allows colors to exceed 1.0 for Bloom
+                    toneMapped={false}
+                    emissive={encoded.color}
+                    emissiveIntensity={resonating ? 4 : (hovered ? 0.8 : 0.2)} 
+                />
+            </mesh>
+        </Float>
+    </group>
+  );
 };
 
 const InfiniteScene = ({ messages, onOrbClick }) => {
-    return (
-        <Canvas camera={{ position: [0, 0, 18], fov: 50 }} gl={{ antialias: false }}>
-            <fog attach="fog" args={['#050505', 10, 50]} />
-            <ambientLight intensity={0.2} />
-            <pointLight position={[10, 10, 10]} intensity={1} />
-            
-            <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
-            <Environment preset="city" />
+  return (
+    <Canvas camera={{ position: [0, 0, 20], fov: 60 }} gl={{ antialias: false, toneMapping: THREE.ReinhardToneMapping }}>
+      <fog attach="fog" args={['#000000', 10, 60]} />
+      <ambientLight intensity={0.2} />
+      <pointLight position={[10, 10, 10]} intensity={1} />
+      
+      {/* Background */}
+      <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
+      <Environment preset="city" />
 
-            <group>
-                {messages.map((msg) => (
-                    <MessageOrb key={msg.id} {...msg} onClick={onOrbClick} />
-                ))}
-            </group>
+      {/* Messages */}
+      <group>
+        {messages.map((msg) => (
+          <MessageOrb key={msg.id} {...msg} onClick={onOrbClick} />
+        ))}
+      </group>
 
-            <EffectComposer disableNormalPass>
-                <Bloom luminanceThreshold={1} mipmapBlur intensity={1.5} radius={0.7} />
-                <Noise opacity={0.05} />
-                <Vignette eskil={false} offset={0.1} darkness={1.1} />
-            </EffectComposer>
+      {/* NEW: Post Processing for Sci-Fi Glow */}
+      <EffectComposer disableNormalPass>
+        <Bloom luminanceThreshold={1} mipmapBlur intensity={1.5} radius={0.6} />
+      </EffectComposer>
 
-            <OrbitControls enableZoom={true} minDistance={5} maxDistance={30} autoRotate autoRotateSpeed={0.3} enablePan={false} />
-        </Canvas>
-    );
+      <OrbitControls enableZoom={true} minDistance={5} maxDistance={40} autoRotate autoRotateSpeed={0.5} enablePan={false} />
+    </Canvas>
+  );
 };
 
-// --- 5. UI COMPONENTS ---
+// --- UI COMPONENTS (Optimized) ---
 
-const Typewriter = ({ text, onComplete, delay = 0 }) => {
-    const [displayedText, setDisplayedText] = useState("");
-    const index = useRef(0);
+const GlassOverlay = ({ children, className = "" }) => (
+  <motion.div
+    initial={{ opacity: 0, y: 20, scale: 0.95 }}
+    animate={{ opacity: 1, y: 0, scale: 1 }}
+    exit={{ opacity: 0, y: 20, scale: 0.95 }}
+    className={`bg-black/40 backdrop-blur-2xl border border-white/10 p-8 rounded-3xl shadow-2xl ${className}`}
+  >
+    {children}
+  </motion.div>
+);
 
-    useEffect(() => {
-        const timeout = setTimeout(() => {
-            const interval = setInterval(() => {
-                setDisplayedText((prev) => {
-                    if (index.current < text.length) {
-                        return prev + text.charAt(index.current);
-                    }
-                    return prev;
-                });
-                index.current++;
-                if (index.current === text.length) {
-                    clearInterval(interval);
-                    if (onComplete) onComplete();
-                }
-            }, 50);
-            return () => clearInterval(interval);
-        }, delay);
-        return () => clearTimeout(timeout);
-    }, [text, delay, onComplete]);
+const SplashScreen = ({ onComplete }) => {
+    const [generating, setGenerating] = useState(false);
 
-    return <span>{displayedText}</span>;
-};
-
-const IntroScreen = ({ onComplete }) => {
-    const [showButton, setShowButton] = useState(false);
-    const [exiting, setExiting] = useState(false);
-
-    const handleEnter = () => {
-        setExiting(true);
-        soundEngine.init();
-        soundEngine.playAmbient();
-        setTimeout(onComplete, 1000);
+    const handleGenerate = () => {
+        setGenerating(true);
+        soundEngine.init(); 
+        soundEngine.playDecrypt();
+        setTimeout(() => {
+            const identity = encodeToVisuals("USER_" + Math.random());
+            onComplete(identity);
+        }, 2500);
     };
 
     return (
-        <div className="absolute inset-0 z-50 bg-black flex flex-col items-center justify-center p-8 overflow-hidden">
-             <AnimatePresence>
-                {!exiting && (
-                    <motion.div 
-                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, scale: 1.1, filter: 'blur(10px)' }}
-                        className="flex flex-col items-center text-center max-w-2xl"
+        <div className="absolute inset-0 z-50 bg-black flex flex-col items-center justify-center p-4">
+             <AnimatePresence mode="wait">
+                {!generating ? (
+                    <motion.div
+                        key="intro"
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, scale: 0.9 }}
+                        className="text-center"
                     >
-                        <motion.div 
-                            animate={{ rotate: 360 }} transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-                            className="w-24 h-24 mb-10 rounded-full border border-white/10 relative"
-                        >
-                            <div className="absolute inset-0 border-t-2 border-white/80 rounded-full shadow-[0_0_15px_rgba(255,255,255,0.5)]" />
-                            <div className="absolute inset-2 border-b-2 border-white/40 rounded-full rotate-45" />
-                        </motion.div>
-
-                        <h1 className="text-6xl md:text-8xl font-black text-transparent bg-clip-text bg-gradient-to-b from-white to-gray-500 tracking-tighter mb-6">
-                            LUMINANCE
+                        <h1 className="text-6xl md:text-8xl font-black text-transparent bg-clip-text bg-gradient-to-b from-white to-purple-900 mb-6 tracking-tighter">
+                            CIPHER
                         </h1>
-
-                        <div className="h-6 mb-12 text-sm md:text-base font-mono text-gray-400 tracking-[0.3em] uppercase">
-                            <Typewriter text="Echoes in the Digital Void" delay={500} onComplete={() => setShowButton(true)} />
-                            <span className="animate-pulse">_</span>
-                        </div>
-
-                        {showButton && (
-                            <motion.button
-                                initial={{ opacity: 0, y: 20 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                onClick={handleEnter}
-                                className="group relative px-10 py-4 bg-transparent border border-white/20 overflow-hidden transition-all duration-300 hover:border-white/60 hover:shadow-[0_0_20px_rgba(255,255,255,0.3)]"
-                            >
-                                <div className="absolute inset-0 bg-white/5 translate-y-full group-hover:translate-y-0 transition-transform duration-500 ease-out" />
-                                <span className="relative z-10 font-mono text-xs font-bold uppercase tracking-widest text-white group-hover:text-black transition-colors duration-300 flex items-center gap-2">
-                                    Initialize <Zap size={14} className="group-hover:fill-black" />
-                                </span>
-                            </motion.button>
-                        )}
+                        <p className="text-purple-300/60 mb-12 text-sm font-mono tracking-[0.3em] uppercase">
+                            Digital Sentiment Visualizer
+                        </p>
+                        <button
+                            onClick={handleGenerate}
+                            className="px-10 py-4 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 hover:border-purple-500 hover:shadow-[0_0_30px_rgba(168,85,247,0.4)] transition-all duration-300"
+                        >
+                            <span className="text-white font-mono uppercase tracking-widest text-sm">
+                                Initialize System
+                            </span>
+                        </button>
+                    </motion.div>
+                ) : (
+                    <motion.div
+                        key="loading"
+                         initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                         className="flex flex-col items-center"
+                    >
+                        <div className="w-16 h-16 border-2 border-purple-500/20 border-t-purple-500 rounded-full animate-spin mb-8" />
+                        <p className="text-xs text-purple-500/80 font-mono animate-pulse tracking-widest">DECRYPTING IDENTITY...</p>
                     </motion.div>
                 )}
              </AnimatePresence>
@@ -303,63 +294,74 @@ const IntroScreen = ({ onComplete }) => {
     );
 };
 
-const DecoderOverlay = ({ message, onClose }) => {
-    const [revealed, setRevealed] = useState(false);
+const DecoderOverlay = ({ message, onClose, onResonate }) => {
+  const [revealed, setRevealed] = useState(false);
+  const [hasResonated, setHasResonated] = useState(false);
 
-    return (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm z-50 p-4" onClick={onClose}>
-            <div onClick={(e) => e.stopPropagation()}>
-                <motion.div
-                    initial={{ scale: 0.9, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    exit={{ scale: 0.9, opacity: 0 }}
-                    className="bg-black/60 border border-white/10 p-8 rounded-none relative max-w-md w-full shadow-2xl backdrop-blur-xl"
-                >
-                    <button onClick={onClose} className="absolute top-4 right-4 text-white/30 hover:text-white transition-colors">
-                        <X size={20} />
-                    </button>
+  const handleResonate = () => {
+    setHasResonated(true);
+    soundEngine.playResonate();
+    onResonate(message.id);
+  };
 
-                    <div className="flex items-center gap-4 mb-8">
-                        <div 
-                            className="w-12 h-12 rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(255,255,255,0.2)]"
-                            style={{ backgroundColor: message.signature.color }}
-                        >
-                            {revealed ? <Unlock size={20} className="text-black/70" /> : <Lock size={20} className="text-black/70" />}
-                        </div>
-                        <div>
-                            <h2 className="text-sm font-mono text-white/50 uppercase tracking-widest">Signal Source</h2>
-                            <p className="text-xs text-white/30 font-mono">{message.id.substring(0,8)}</p>
-                        </div>
-                    </div>
+  return (
+    <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm z-50 p-4" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()}>
+          <GlassOverlay className="max-w-md w-full text-center relative overflow-hidden">
+            <button onClick={onClose} className="absolute top-6 right-6 text-white/30 hover:text-white transition-colors">
+              <X size={20} />
+            </button>
 
-                    <div 
-                        className="min-h-[140px] flex items-center justify-center text-center p-4 border border-white/5 bg-white/5 cursor-pointer hover:bg-white/10 transition-colors mb-6 select-none"
-                        onPointerDown={() => setRevealed(true)}
-                        onPointerUp={() => setRevealed(false)}
-                        onPointerLeave={() => setRevealed(false)}
-                        onTouchStart={() => setRevealed(true)}
-                        onTouchEnd={() => setRevealed(false)}
-                    >
-                         <p className={`text-xl md:text-2xl font-light leading-relaxed transition-all duration-300 ${revealed ? 'text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.5)]' : 'text-gray-600'}`}>
-                            <ScrambleText text={message.text} revealed={revealed} />
-                         </p>
-                    </div>
+            <motion.div
+                animate={{ scale: revealed ? 1 : 0.9, filter: revealed ? 'blur(0px)' : 'blur(0px)' }}
+                className="mb-8 flex justify-center relative"
+            >
+                 <div
+                    className={`w-32 h-32 rounded-full flex items-center justify-center transition-all duration-500`}
+                    style={{ 
+                        backgroundColor: message.encoded.color,
+                        boxShadow: revealed ? `0 0 60px ${message.encoded.color}80` : 'none'
+                    }}
+                 >
+                    {revealed ? <Unlock size={40} className="text-black/50" /> : <Lock size={40} className="text-black/50" />}
+                 </div>
+            </motion.div>
 
-                    <div className="flex justify-between items-center border-t border-white/10 pt-4">
-                        <span className="text-[10px] uppercase tracking-widest text-white/30 animate-pulse">
-                            {revealed ? "Decryption Complete" : "Hold to Decrypt"}
-                        </span>
-                        <div className="flex gap-1">
-                            <div className="w-1 h-1 bg-white/20 rounded-full" />
-                            <div className="w-1 h-1 bg-white/20 rounded-full" />
-                            <div className="w-1 h-1 bg-white/20 rounded-full" />
-                        </div>
-                    </div>
-
-                </motion.div>
+            <div
+                className="bg-black/50 border border-white/5 p-6 rounded-xl min-h-[120px] flex items-center justify-center cursor-pointer select-none active:scale-[0.98] transition-all hover:border-white/20"
+                onPointerDown={() => setRevealed(true)}
+                onPointerUp={() => setRevealed(false)}
+                onPointerLeave={() => setRevealed(false)}
+                onTouchStart={() => setRevealed(true)}
+                onTouchEnd={() => setRevealed(false)}
+            >
+               <p className={`text-xl font-mono transition-all duration-200 ${revealed ? 'text-white' : 'text-green-500/50 blur-[4px]'}`}>
+                 {revealed ? message.text : message.encoded.hash.toString(16).substring(0, 20)}
+               </p>
             </div>
-        </div>
-    );
+
+            <p className="mt-4 text-[10px] text-white/30 uppercase tracking-widest mb-8">
+                {revealed ? "System Decrypted" : "Hold to Decrypt"}
+            </p>
+
+            {revealed && (
+                <motion.button
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    disabled={hasResonated}
+                    onClick={handleResonate}
+                    className={`w-full py-4 rounded-xl font-bold tracking-widest uppercase text-sm transition-all
+                       ${hasResonated
+                           ? 'bg-green-500/10 text-green-500 border border-green-500/30'
+                           : 'bg-white text-black hover:bg-gray-200'}`}
+                >
+                    {hasResonated ? "Signal Synced" : "Resonate"}
+                </motion.button>
+            )}
+          </GlassOverlay>
+      </div>
+    </div>
+  );
 };
 
 const ComposeBar = ({ onSend }) => {
@@ -374,80 +376,77 @@ const ComposeBar = ({ onSend }) => {
 
     return (
         <form onSubmit={handleSubmit} className="absolute bottom-10 left-0 right-0 flex justify-center px-4 z-40 pointer-events-none">
-            <div className="pointer-events-auto flex w-full max-w-lg bg-black/80 backdrop-blur-xl border border-white/10 p-1 shadow-2xl hover:border-white/30 transition-all duration-300 group">
+            <div className="pointer-events-auto flex w-full max-w-lg bg-black/60 backdrop-blur-xl border border-white/10 rounded-full p-2 shadow-2xl hover:border-purple-500/50 focus-within:border-purple-500 transition-all duration-300">
                 <input
                     type="text"
                     value={text}
                     onChange={(e) => setText(e.target.value)}
-                    placeholder="Broadcast to the void..."
+                    placeholder="Broadcast your frequency..."
                     className="flex-1 bg-transparent border-none outline-none text-white px-6 placeholder-white/20 font-mono text-sm"
                 />
                 <button
                     type="submit"
-                    className="w-12 h-12 bg-white/5 flex items-center justify-center text-white/50 hover:bg-white hover:text-black transition-all duration-300"
+                    className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center text-white hover:bg-white hover:text-black transition-all duration-300 active:scale-90"
                 >
-                    <Send size={16} />
+                    <Send size={18} />
                 </button>
             </div>
         </form>
     );
 };
 
-// --- MAIN APPLICATION ---
+// --- MAIN APP ---
 
 export default function App() {
-    const [started, setStarted] = useState(false);
-    const [messages, setMessages] = useState([]);
-    const [selectedMsg, setSelectedMsg] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [selectedMsg, setSelectedMsg] = useState(null);
+  const [identity, setIdentity] = useState(null);
 
-    useEffect(() => {
-        if (started && messages.length === 0) {
-            ["Secrets lie within the noise", "Luminance online", "What do you see?"].forEach(t => addMessage(t, true, false));
-        }
-    }, [started]);
+  useEffect(() => {
+    const seeds = ["Welcome to CipherCanvas", "Secrets hide in plain sight", "I am angry!", "Calm waves..."];
+    seeds.forEach(txt => addMessage(txt, true, false));
+  }, []);
 
-    const addMessage = (text, randomPos = false, isNew = true) => {
-        const signature = generateSignature(text);
-        
-        const pos = randomPos ? 
-            [(Math.random() - 0.5) * 25, (Math.random() - 0.5) * 25, (Math.random() - 0.5) * 25] :
-            [(Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8];
-        
-        setMessages(prev => [...prev, { id: uuidv4(), text, signature, position: pos, isNew }]);
-    };
+  const addMessage = (text, randomPos = false, isNew = true) => {
+    const encoded = encodeToVisuals(text);
+    const pos = randomPos ?
+        [(Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30] :
+        [(Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12];
+    
+    setMessages(prev => [...prev, { id: uuidv4(), text, encoded, position: pos, resonating: false, isNew }]);
+  };
 
-    return (
-        <div className="w-full h-screen bg-black text-white overflow-hidden relative font-sans">
-            
-            {/* Intro Screen */}
-            {!started && <IntroScreen onComplete={() => setStarted(true)} />}
+  const triggerResonance = (id) => {
+      setMessages(prev => prev.map(msg => msg.id === id ? { ...msg, resonating: true } : msg));
+      setTimeout(() => {
+          setMessages(prev => prev.map(msg => msg.id === id ? { ...msg, resonating: false } : msg));
+      }, 3000);
+  };
 
-            {/* Main Interface - Controls Opacity */}
-            <div className={`w-full h-full transition-opacity duration-1000 ${started ? 'opacity-100' : 'opacity-0'}`}>
-                {/* HUD */}
-                <div className="absolute top-8 left-8 z-10 pointer-events-none select-none mix-blend-difference">
-                    <h1 className="text-xl font-bold tracking-tight uppercase text-white">Luminance</h1>
-                    <div className="flex items-center gap-2 mt-1">
-                        <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                        <span className="text-[10px] font-mono text-white/60 tracking-widest">NETWORK: SECURE</span>
-                    </div>
-                </div>
+  if (!identity) return <SplashScreen onComplete={setIdentity} />;
 
-                {/* 3D World */}
-                <div className="absolute inset-0 z-0">
-                    <InfiniteScene messages={messages} onOrbClick={setSelectedMsg} />
-                </div>
-
-                {/* Input */}
-                <ComposeBar onSend={addMessage} />
-
-                {/* Decoder Modal */}
-                <AnimatePresence>
-                    {selectedMsg && (
-                        <DecoderOverlay message={selectedMsg} onClose={() => setSelectedMsg(null)} />
-                    )}
-                </AnimatePresence>
-            </div>
+  return (
+    <div className="w-full h-screen bg-black text-white overflow-hidden relative font-sans">
+      {/* HUD Layers */}
+      <div className="absolute top-8 left-8 z-10 pointer-events-none select-none">
+        <h1 className="text-2xl font-black tracking-tight uppercase text-white/80">CipherCanvas</h1>
+        <div className="flex items-center gap-2 mt-2">
+            <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: identity.color }} />
+            <span className="text-[10px] font-mono text-white/40 tracking-widest">SIGNAL: ONLINE</span>
         </div>
-    );
+      </div>
+
+      <div className="absolute inset-0 z-0">
+         <InfiniteScene messages={messages} onOrbClick={setSelectedMsg} />
+      </div>
+
+      <ComposeBar onSend={addMessage} />
+
+      <AnimatePresence>
+        {selectedMsg && (
+            <DecoderOverlay message={selectedMsg} onClose={() => setSelectedMsg(null)} onResonate={triggerResonance} />
+        )}
+      </AnimatePresence>
+    </div>
+  );
 }
