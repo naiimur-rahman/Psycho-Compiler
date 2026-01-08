@@ -230,10 +230,50 @@ const InfiniteScene = ({ messages, onOrbClick }) => (
 
 // --- UI OVERLAY ---
 
+const DecryptedText = ({ text, isDecrypting, progress }) => {
+  const [displayText, setDisplayText] = useState('');
+  const chars = '!@#$%^&*()_+~[]{}:;?><';
+
+  useEffect(() => {
+    if (!isDecrypting) {
+      setDisplayText('');
+      return;
+    }
+
+    // "Matrix/Hacker" style scramble logic
+    const length = text.length;
+    const revealedCount = Math.floor(progress * length);
+
+    let result = '';
+    for (let i = 0; i < length; i++) {
+      if (i < revealedCount) {
+        result += text[i];
+      } else {
+        result += chars[Math.floor(Math.random() * chars.length)];
+      }
+    }
+    setDisplayText(result);
+  }, [text, isDecrypting, progress]);
+
+  return (
+    <motion.span
+      className="font-mono text-cyan-300 glow-text"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: isDecrypting ? 1 : 0 }}
+    >
+      {displayText}
+    </motion.span>
+  );
+};
+
 const UIOverlay = ({ onAddMessage, selectedMsg, onCloseSelected }) => {
   const [inputText, setInputText] = useState('');
   const [isInputFocused, setInputFocused] = useState(false);
   const [isHolding, setHolding] = useState(false);
+  const [decryptProgress, setDecryptProgress] = useState(0);
+  const requestRef = useRef();
+  const startTimeRef = useRef();
+  const holdDuration = 500; // 0.5s
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -244,16 +284,41 @@ const UIOverlay = ({ onAddMessage, selectedMsg, onCloseSelected }) => {
     }
   };
 
+  const animate = (time) => {
+    if (!startTimeRef.current) startTimeRef.current = time;
+    const elapsed = time - startTimeRef.current;
+    const progress = Math.min(elapsed / holdDuration, 1);
+
+    setDecryptProgress(progress);
+
+    if (progress < 1) {
+      requestRef.current = requestAnimationFrame(animate);
+    } else {
+       // Done
+    }
+  };
+
   const handleHoldStart = () => {
     setHolding(true);
+    setDecryptProgress(0);
     soundEngine.playDecrypt();
+    startTimeRef.current = null;
+    requestRef.current = requestAnimationFrame(animate);
   };
 
   const handleHoldEnd = () => {
-    if (isHolding) {
-      setHolding(false);
-      onCloseSelected();
+    setHolding(false);
+    setDecryptProgress(0);
+    if (requestRef.current) {
+      cancelAnimationFrame(requestRef.current);
     }
+    // If fully decrypted, close after a tiny delay or immediately?
+    // User requirement: "Immediately close/revert to the 3D scene upon release."
+    // BUT checking logic: if they release, it should just revert.
+    // If they held it long enough to see the message, and then released, it closes.
+    // Actually the requirement says "immediately close/revert... upon release".
+    // So if they release, we close.
+    onCloseSelected();
   };
 
   return (
@@ -301,7 +366,7 @@ const UIOverlay = ({ onAddMessage, selectedMsg, onCloseSelected }) => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xl"
             onClick={(e) => {
               if (e.target === e.currentTarget) onCloseSelected();
             }}
@@ -310,43 +375,69 @@ const UIOverlay = ({ onAddMessage, selectedMsg, onCloseSelected }) => {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-2xl bg-black/80 border border-white/10 rounded-3xl p-16 text-center select-none cursor-pointer shadow-2xl overflow-hidden"
+              className="relative w-full max-w-3xl bg-black/40 border border-white/10 rounded-3xl p-20 text-center select-none cursor-pointer shadow-[0_0_50px_rgba(168,85,247,0.2)] overflow-hidden group"
               onPointerDown={handleHoldStart}
               onPointerUp={handleHoldEnd}
               onPointerLeave={handleHoldEnd}
               whileTap={{ scale: 0.98 }}
             >
-              <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent pointer-events-none" />
+              {/* Dynamic Border Gradient */}
+              <div className={`absolute inset-0 rounded-3xl border-2 transition-colors duration-500 ${isHolding ? 'border-cyan-500/50' : 'border-white/5'}`} />
 
-              <div className="relative z-10 flex flex-col items-center gap-8">
-                <Lock size={48} className={`text-white/20 transition-all duration-500 ${isHolding ? 'opacity-0 scale-50' : 'opacity-100 scale-100'}`} />
+              {/* Active Scanline Effect */}
+              {isHolding && (
+                <div className="absolute inset-0 bg-gradient-to-b from-transparent via-cyan-500/10 to-transparent animate-scan pointer-events-none" />
+              )}
 
-                <motion.div
-                  animate={{ filter: isHolding ? 'blur(0px)' : 'blur(15px)', opacity: isHolding ? 1 : 0.5 }}
-                  transition={{ duration: 1.5, ease: "circOut" }}
-                  className="w-full"
-                >
-                  <p className="text-3xl md:text-4xl font-light leading-relaxed text-white tracking-wide">
-                    &quot;{selectedMsg.text}&quot;
-                  </p>
-                </motion.div>
+              <div className="relative z-10 flex flex-col items-center gap-10 min-h-[200px] justify-center">
+                {/* Lock Icon Logic */}
+                <div className="relative">
+                   <Lock
+                     size={48}
+                     className={`text-white/40 transition-all duration-300 ${isHolding ? 'opacity-0 scale-50' : 'opacity-100 scale-100'}`}
+                   />
+                   <Unlock
+                     size={48}
+                     className={`absolute top-0 left-0 text-cyan-400 transition-all duration-300 ${isHolding ? 'opacity-100 scale-110 drop-shadow-[0_0_15px_rgba(34,211,238,0.8)]' : 'opacity-0 scale-50'}`}
+                   />
+                </div>
 
+                <div className="w-full relative h-20 flex items-center justify-center">
+                  {isHolding && (
+                     <p className="text-3xl md:text-5xl font-bold leading-relaxed tracking-wide break-words w-full">
+                       <DecryptedText text={selectedMsg.text} isDecrypting={isHolding} progress={decryptProgress} />
+                     </p>
+                  )}
+                </div>
+
+                {/* Progress Indicator */}
                 <motion.div
                   animate={{ opacity: isHolding ? 0 : 1, y: isHolding ? 20 : 0 }}
-                  className="flex flex-col items-center gap-2"
+                  className="flex flex-col items-center gap-3"
                 >
-                  <p className="text-sm font-bold tracking-[0.3em] text-purple-400 uppercase animate-pulse">
+                  <p className="text-xs font-bold tracking-[0.3em] text-cyan-400/80 uppercase">
                     Hold to Decrypt
                   </p>
-                  <div className="w-12 h-1 bg-white/10 rounded-full overflow-hidden">
+                  <div className="w-48 h-1 bg-white/5 rounded-full overflow-hidden">
+                     {/* Idle animation */}
                     <motion.div
-                      className="h-full bg-purple-500"
-                      initial={{ width: "0%" }}
-                      animate={{ width: "100%" }}
-                      transition={{ duration: 2, repeat: Infinity }}
+                      className="h-full bg-cyan-500/50"
+                      initial={{ width: "0%", x: "-100%" }}
+                      animate={{ width: "30%", x: "400%" }}
+                      transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
                     />
                   </div>
                 </motion.div>
+
+                {/* Active Progress Ring (optional replacement for bar) */}
+                {isHolding && (
+                   <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-48 h-1 bg-white/10 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-cyan-400 shadow-[0_0_10px_#22d3ee]"
+                        style={{ width: `${decryptProgress * 100}%` }}
+                      />
+                   </div>
+                )}
               </div>
             </motion.div>
           </motion.div>
