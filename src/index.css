@@ -9,3 +9,18 @@
     overflow: hidden;
   }
 }
+
+@layer utilities {
+  .glow-text {
+    text-shadow: 0 0 10px rgba(34, 211, 238, 0.7), 0 0 20px rgba(34, 211, 238, 0.5);
+  }
+
+  .animate-scan {
+    animation: scan 2s linear infinite;
+  }
+
+  @keyframes scan {
+    0% { transform: translateY(-100%); }
+    100% { transform: translateY(100%); }
+  }
+}
