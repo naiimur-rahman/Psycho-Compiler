@@ -136,6 +136,7 @@ const MessageOrb = ({ id, position, encoded, text, onClick, resonating, isNew })
   const meshRef = useRef();
   const [hovered, setHover] = useState(false);
   const glow = useRef(0);
+  const [floatSpeed, setFloatSpeed] = useState(isNew ? 0 : 2);
 
   const startPos = useRef(new THREE.Vector3(0, 0, 20));
   const targetPos = useMemo(() => new THREE.Vector3(...position), [position]);
@@ -146,7 +147,10 @@ const MessageOrb = ({ id, position, encoded, text, onClick, resonating, isNew })
 
     if (progress.current < 1) {
       progress.current += delta * 0.5;
-      if (progress.current > 1) progress.current = 1;
+      if (progress.current >= 1) {
+        progress.current = 1;
+        setFloatSpeed(2); // Enable floating once arrived
+      }
 
       meshRef.current.position.lerpVectors(startPos.current, targetPos, progress.current);
       meshRef.current.rotation.x += delta * 10;
@@ -170,7 +174,7 @@ const MessageOrb = ({ id, position, encoded, text, onClick, resonating, isNew })
   });
 
   return (
-    <Float speed={progress.current < 1 ? 0 : 2} rotationIntensity={1} floatIntensity={2}>
+    <Float speed={floatSpeed} rotationIntensity={1} floatIntensity={2}>
       <mesh
         ref={meshRef}
         position={isNew ? [0, 0, 20] : position}
@@ -224,17 +228,215 @@ const InfiniteScene = ({ messages, onOrbClick }) => (
   </Canvas>
 );
 
+// --- UI OVERLAY ---
+
+const UIOverlay = ({ onAddMessage, selectedMsg, onCloseSelected }) => {
+  const [inputText, setInputText] = useState('');
+  const [isInputFocused, setInputFocused] = useState(false);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (inputText.trim()) {
+      onAddMessage(inputText);
+      setInputText('');
+      soundEngine.playDecrypt();
+    }
+  };
+
+  return (
+    <>
+      {/* Top Bar / Brand */}
+      <div className="absolute top-0 left-0 w-full p-6 z-10 flex justify-between items-start pointer-events-none">
+        <div className="pointer-events-auto">
+           <h2 className="text-2xl font-bold tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-blue-400">
+             LUMINANCE
+           </h2>
+           <p className="text-xs text-white/50 tracking-widest uppercase">Visualizer Active</p>
+        </div>
+      </div>
+
+      {/* Message Input - Bottom Center */}
+      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 w-full max-w-lg z-10 px-4">
+        <form onSubmit={handleSubmit} className="relative group">
+          <div className={`absolute inset-0 bg-gradient-to-r from-purple-600 to-blue-600 rounded-2xl blur opacity-20 transition-opacity duration-500 ${isInputFocused ? 'opacity-50' : ''}`} />
+          <div className="relative flex items-center bg-black/40 backdrop-blur-xl border border-white/10 rounded-2xl p-2 transition-all duration-300 focus-within:border-white/30 focus-within:bg-black/60">
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              onFocus={() => setInputFocused(true)}
+              onBlur={() => setInputFocused(false)}
+              placeholder="Type a secret to visualize..."
+              className="w-full bg-transparent border-none outline-none text-white placeholder-white/30 px-4 py-2 font-light"
+            />
+            <motion.button
+              whileHover={{ scale: 1.1, rotate: 90 }}
+              whileTap={{ scale: 0.9 }}
+              type="submit"
+              className="p-2 bg-white/10 rounded-xl hover:bg-white/20 text-purple-400 transition-colors"
+            >
+              <Send size={20} />
+            </motion.button>
+          </div>
+        </form>
+      </div>
+
+      {/* Selected Message Panel - Right Side */}
+      <AnimatePresence>
+        {selectedMsg && (
+          <motion.div
+            initial={{ x: 400, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: 400, opacity: 0 }}
+            className="absolute top-0 right-0 h-full w-full md:w-96 bg-black/60 backdrop-blur-2xl border-l border-white/10 z-20 p-8 flex flex-col shadow-2xl"
+          >
+            <div className="flex justify-between items-center mb-8">
+              <h3 className="text-lg font-mono text-white/70 uppercase tracking-widest">Decrypted Data</h3>
+              <button
+                onClick={onCloseSelected}
+                className="p-2 hover:bg-white/10 rounded-full transition-colors text-white/50 hover:text-white"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="flex-1 space-y-6 overflow-y-auto">
+              <div className="p-6 rounded-2xl bg-white/5 border border-white/10 relative overflow-hidden group">
+                <div className="absolute inset-0 bg-gradient-to-br from-purple-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                <p className="text-2xl font-light leading-relaxed relative z-10">"{selectedMsg.text}"</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 rounded-xl bg-white/5 border border-white/5">
+                  <span className="text-xs text-white/40 uppercase block mb-1">Resonance</span>
+                  <span className="text-lg font-mono text-purple-300">{(selectedMsg.encoded.hash % 1000).toString().padStart(4, '0')}Hz</span>
+                </div>
+                <div className="p-4 rounded-xl bg-white/5 border border-white/5">
+                   <span className="text-xs text-white/40 uppercase block mb-1">Stability</span>
+                   <div className="flex items-center gap-2">
+                     <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden">
+                       <div className="h-full bg-blue-500" style={{ width: `${(1 - selectedMsg.encoded.distort) * 100}%` }} />
+                     </div>
+                   </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-xs text-white/40 uppercase">Visual Signature</p>
+                <div className="flex items-center gap-2 text-sm text-white/60 font-mono">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: selectedMsg.encoded.color }} />
+                  {selectedMsg.encoded.color} / {selectedMsg.encoded.shape}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-8 pt-8 border-t border-white/10">
+              <button
+                onClick={() => {
+                    soundEngine.playResonate();
+                }}
+                className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all uppercase tracking-widest text-sm font-medium flex items-center justify-center gap-2 group"
+              >
+                <RotateCcw size={16} className="group-hover:rotate-180 transition-transform duration-500" />
+                Resonate
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
+  );
+};
+
+// --- LANDING PAGE ---
+
+const TypewriterText = ({ text, delay = 0, className }) => {
+  const [displayedText, setDisplayedText] = useState('');
+
+  useEffect(() => {
+    let timeout;
+    if (displayedText.length < text.length) {
+      timeout = setTimeout(() => {
+        setDisplayedText(text.slice(0, displayedText.length + 1));
+      }, 100);
+    }
+    return () => clearTimeout(timeout);
+  }, [displayedText, text]);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ delay }}
+      className={className}
+    >
+      {displayedText}
+      <motion.span
+        animate={{ opacity: [0, 1, 0] }}
+        transition={{ repeat: Infinity, duration: 0.8 }}
+      >|</motion.span>
+    </motion.div>
+  );
+};
+
+const LandingPage = ({ onEnter }) => {
+  return (
+    <div className="w-full h-screen bg-black text-white flex flex-col items-center justify-center relative overflow-hidden">
+       {/* Background Elements */}
+       <div className="absolute top-0 left-0 w-full h-full opacity-20 pointer-events-none">
+          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-purple-600 rounded-full blur-[100px]" />
+          <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-600 rounded-full blur-[100px]" />
+       </div>
+
+      <div className="z-10 flex flex-col items-center space-y-8 text-center p-8">
+        <motion.h1
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 1 }}
+          className="text-6xl md:text-8xl font-bold tracking-tighter bg-clip-text text-transparent bg-gradient-to-b from-white to-white/50"
+        >
+          Luminance
+        </motion.h1>
+
+        <TypewriterText
+          text="Secrets in Light and sound"
+          delay={1}
+          className="text-xl md:text-2xl text-blue-200 font-light tracking-widest uppercase"
+        />
+
+        <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 2.5, duration: 0.5 }}
+        >
+          <motion.button
+            whileHover={{
+              scale: 1.05,
+              boxShadow: "0 0 20px rgba(168, 85, 247, 0.5)",
+              backgroundColor: "rgba(255, 255, 255, 0.1)"
+            }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => {
+                soundEngine.init();
+                onEnter();
+            }}
+            className="px-8 py-4 bg-white/5 backdrop-blur-md border border-white/10 rounded-full text-white font-medium tracking-wide transition-all group relative overflow-hidden"
+          >
+            <span className="relative z-10">Enter Luminance</span>
+            <div className="absolute inset-0 bg-gradient-to-r from-purple-500/20 to-blue-500/20 opacity-0 group-hover:opacity-100 transition-opacity" />
+          </motion.button>
+        </motion.div>
+      </div>
+    </div>
+  );
+};
+
 // --- MAIN APP ---
 
 export default function App() {
   const [messages, setMessages] = useState([]);
   const [selectedMsg, setSelectedMsg] = useState(null);
   const [identity, setIdentity] = useState(null);
-
-  useEffect(() => {
-    ['Welcome to CipherCanvas', 'Secrets hide in plain sight', 'I am angry!', 'Calm waves...']
-      .forEach(txt => addMessage(txt, true, false));
-  }, []);
 
   const addMessage = (text, randomPos = false, isNew = true) => {
     const encoded = encodeToVisuals(text);
@@ -252,12 +454,22 @@ export default function App() {
     }]);
   };
 
+  useEffect(() => {
+    ['Welcome to Luminance', 'Secrets in Light and sound', 'I am angry!', 'Calm waves...']
+      .forEach(txt => addMessage(txt, true, false));
+  }, []);
+
   if (!identity) {
-    return <div className="w-full h-screen bg-black text-white flex items-center justify-center">Loading…</div>;
+    return <LandingPage onEnter={() => setIdentity(true)} />;
   }
 
   return (
     <div className="w-full h-screen bg-black text-white overflow-hidden relative">
+      <UIOverlay
+        onAddMessage={addMessage}
+        selectedMsg={selectedMsg}
+        onCloseSelected={() => setSelectedMsg(null)}
+      />
       <InfiniteScene messages={messages} onOrbClick={setSelectedMsg} />
     </div>
   );
