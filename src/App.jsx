@@ -1,88 +1,11 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Stars, MeshDistortMaterial, Text, Float, Environment, TorusKnot, Icosahedron, Octahedron, Dodecahedron, Tetrahedron, Sphere } from '@react-three/drei';
+import { OrbitControls, Stars, MeshDistortMaterial, Float, Environment, TorusKnot, Icosahedron, Octahedron, Dodecahedron, Tetrahedron, Sphere } from '@react-three/drei';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, X, Lock, Unlock, Eye, Send, RotateCcw } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import * as THREE from 'three';
 
-// --- AUDIO ENGINE (w1, w3) ---
-class SoundEngine {
-  constructor() {
-    this.ctx = null;
-    this.osc = null;
-    this.gain = null;
-  }
-
-  init() {
-    if (!this.ctx) {
-      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    if (this.ctx.state === 'suspended') {
-      this.ctx.resume();
-    }
-  }
-
-  playTone(freq, type = 'sine', duration = 0.5, vol = 0.1) {
-    if (!this.ctx) this.init();
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
-
-    gain.gain.setValueAtTime(0, this.ctx.currentTime);
-    gain.gain.linearRampToValueAtTime(vol, this.ctx.currentTime + 0.05);
-    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
-
-    osc.connect(gain);
-    gain.connect(this.ctx.destination);
-
-    osc.start();
-    osc.stop(this.ctx.currentTime + duration);
-  }
-
-  playHover(encoded) {
-    if (!this.ctx) return;
-
-    const isAngry = encoded.color === '#ef4444';
-    const isCalm = encoded.color === '#3b82f6';
-    const isSecret = encoded.color === '#22c55e';
-
-    let freq = 440;
-    let type = 'sine';
-
-    if (isAngry) { freq = 150; type = 'sawtooth'; }
-    else if (isCalm) { freq = 600; type = 'sine'; }
-    else if (isSecret) { freq = 800; type = 'square'; }
-    else { freq = 300 + (encoded.hash % 500); }
-
-    this.playTone(freq, type, 0.3, 0.05);
-  }
-
-  playDecrypt() {
-    if (!this.ctx) return;
-    for (let i = 0; i < 10; i++) {
-      setTimeout(() => {
-        this.playTone(1000 + Math.random() * 2000, 'square', 0.05, 0.02);
-      }, i * 50);
-    }
-  }
-
-  playResonate() {
-    if (!this.ctx) return;
-    const chord = [261.63, 329.63, 392.0, 523.25];
-    chord.forEach((note, i) => {
-      setTimeout(() => {
-        this.playTone(note, 'sine', 2.0, 0.1);
-      }, i * 100);
-    });
-  }
-}
-
-const soundEngine = new SoundEngine();
-
-// --- ENCODER LOGIC ---
 const encodeToVisuals = (text) => {
   let hash = 0;
   for (let i = 0; i < text.length; i++) {
@@ -130,8 +53,6 @@ const encodeToVisuals = (text) => {
   return { color, distort, speed, hash, shape, pattern };
 };
 
-// --- 3D COMPONENTS ---
-
 const MessageOrb = ({ id, position, encoded, text, onClick, resonating, isNew }) => {
   const meshRef = useRef();
   const [hovered, setHover] = useState(false);
@@ -149,7 +70,7 @@ const MessageOrb = ({ id, position, encoded, text, onClick, resonating, isNew })
       progress.current += delta * 0.5;
       if (progress.current >= 1) {
         progress.current = 1;
-        setFloatSpeed(2); // Enable floating once arrived
+        setFloatSpeed(2); 
       }
 
       meshRef.current.position.lerpVectors(startPos.current, targetPos, progress.current);
@@ -184,7 +105,6 @@ const MessageOrb = ({ id, position, encoded, text, onClick, resonating, isNew })
         }}
         onPointerOver={() => {
           setHover(true);
-          soundEngine.playHover(encoded);
         }}
         onPointerOut={() => setHover(false)}
       >
@@ -228,8 +148,6 @@ const InfiniteScene = ({ messages, onOrbClick }) => (
   </Canvas>
 );
 
-// --- UI OVERLAY ---
-
 const DecryptedText = ({ text, isDecrypting, progress }) => {
   const [displayText, setDisplayText] = useState('');
   const chars = '!@#$%^&*()_+~[]{}:;?><';
@@ -240,7 +158,6 @@ const DecryptedText = ({ text, isDecrypting, progress }) => {
       return;
     }
 
-    // "Matrix/Hacker" style scramble logic
     const length = text.length;
     const revealedCount = Math.floor(progress * length);
 
@@ -273,14 +190,13 @@ const UIOverlay = ({ onAddMessage, selectedMsg, onCloseSelected }) => {
   const [decryptProgress, setDecryptProgress] = useState(0);
   const requestRef = useRef();
   const startTimeRef = useRef();
-  const holdDuration = 500; // 0.5s
+  const holdDuration = 500; 
 
   const handleSubmit = (e) => {
     e.preventDefault();
     if (inputText.trim()) {
       onAddMessage(inputText);
       setInputText('');
-      soundEngine.playDecrypt();
     }
   };
 
@@ -294,14 +210,13 @@ const UIOverlay = ({ onAddMessage, selectedMsg, onCloseSelected }) => {
     if (progress < 1) {
       requestRef.current = requestAnimationFrame(animate);
     } else {
-       // Done
+       
     }
   };
 
   const handleHoldStart = () => {
     setHolding(true);
     setDecryptProgress(0);
-    soundEngine.playDecrypt();
     startTimeRef.current = null;
     requestRef.current = requestAnimationFrame(animate);
   };
@@ -312,18 +227,11 @@ const UIOverlay = ({ onAddMessage, selectedMsg, onCloseSelected }) => {
     if (requestRef.current) {
       cancelAnimationFrame(requestRef.current);
     }
-    // If fully decrypted, close after a tiny delay or immediately?
-    // User requirement: "Immediately close/revert to the 3D scene upon release."
-    // BUT checking logic: if they release, it should just revert.
-    // If they held it long enough to see the message, and then released, it closes.
-    // Actually the requirement says "immediately close/revert... upon release".
-    // So if they release, we close.
     onCloseSelected();
   };
 
   return (
     <>
-      {/* Top Bar / Brand */}
       <div className="absolute top-0 left-0 w-full p-6 z-10 flex justify-between items-start pointer-events-none">
         <div className="pointer-events-auto">
            <h2 className="text-2xl font-bold tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-blue-400">
@@ -333,7 +241,6 @@ const UIOverlay = ({ onAddMessage, selectedMsg, onCloseSelected }) => {
         </div>
       </div>
 
-      {/* Message Input - Bottom Center */}
       <div className="absolute bottom-8 left-1/2 -translate-x-1/2 w-full max-w-lg z-10 px-4">
         <form onSubmit={handleSubmit} className="relative group">
           <div className={`absolute inset-0 bg-gradient-to-r from-purple-600 to-blue-600 rounded-2xl blur opacity-20 transition-opacity duration-500 ${isInputFocused ? 'opacity-50' : ''}`} />
@@ -359,7 +266,6 @@ const UIOverlay = ({ onAddMessage, selectedMsg, onCloseSelected }) => {
         </form>
       </div>
 
-      {/* Central Decryption Modal */}
       <AnimatePresence>
         {selectedMsg && (
           <motion.div
@@ -381,16 +287,13 @@ const UIOverlay = ({ onAddMessage, selectedMsg, onCloseSelected }) => {
               onPointerLeave={handleHoldEnd}
               whileTap={{ scale: 0.98 }}
             >
-              {/* Dynamic Border Gradient */}
               <div className={`absolute inset-0 rounded-3xl border-2 transition-colors duration-500 ${isHolding ? 'border-cyan-500/50' : 'border-white/5'}`} />
 
-              {/* Active Scanline Effect */}
               {isHolding && (
                 <div className="absolute inset-0 bg-gradient-to-b from-transparent via-cyan-500/10 to-transparent animate-scan pointer-events-none" />
               )}
 
               <div className="relative z-10 flex flex-col items-center gap-10 min-h-[200px] justify-center">
-                {/* Lock Icon Logic */}
                 <div className="relative">
                    <Lock
                      size={48}
@@ -410,7 +313,6 @@ const UIOverlay = ({ onAddMessage, selectedMsg, onCloseSelected }) => {
                   )}
                 </div>
 
-                {/* Progress Indicator */}
                 <motion.div
                   animate={{ opacity: isHolding ? 0 : 1, y: isHolding ? 20 : 0 }}
                   className="flex flex-col items-center gap-3"
@@ -419,7 +321,6 @@ const UIOverlay = ({ onAddMessage, selectedMsg, onCloseSelected }) => {
                     Hold to Decrypt
                   </p>
                   <div className="w-48 h-1 bg-white/5 rounded-full overflow-hidden">
-                     {/* Idle animation */}
                     <motion.div
                       className="h-full bg-cyan-500/50"
                       initial={{ width: "0%", x: "-100%" }}
@@ -429,7 +330,6 @@ const UIOverlay = ({ onAddMessage, selectedMsg, onCloseSelected }) => {
                   </div>
                 </motion.div>
 
-                {/* Active Progress Ring (optional replacement for bar) */}
                 {isHolding && (
                    <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-48 h-1 bg-white/10 rounded-full overflow-hidden">
                       <div
@@ -446,8 +346,6 @@ const UIOverlay = ({ onAddMessage, selectedMsg, onCloseSelected }) => {
     </>
   );
 };
-
-// --- LANDING PAGE ---
 
 const TypewriterText = ({ text, delay = 0, className }) => {
   const [displayedText, setDisplayedText] = useState('');
@@ -481,7 +379,6 @@ const TypewriterText = ({ text, delay = 0, className }) => {
 const LandingPage = ({ onEnter }) => {
   return (
     <div className="w-full h-screen bg-black text-white flex flex-col items-center justify-center relative overflow-hidden">
-       {/* Background Elements */}
        <div className="absolute top-0 left-0 w-full h-full opacity-20 pointer-events-none">
           <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-purple-600 rounded-full blur-[100px]" />
           <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-600 rounded-full blur-[100px]" />
@@ -498,7 +395,7 @@ const LandingPage = ({ onEnter }) => {
         </motion.h1>
 
         <TypewriterText
-          text="Secrets in Light and sound"
+          text="SECRETS IN LIGHT and ABSTRACT"
           delay={1}
           className="text-xl md:text-2xl text-blue-200 font-light tracking-widest uppercase"
         />
@@ -516,7 +413,6 @@ const LandingPage = ({ onEnter }) => {
             }}
             whileTap={{ scale: 0.95 }}
             onClick={() => {
-                soundEngine.init();
                 onEnter();
             }}
             className="px-8 py-4 bg-white/5 backdrop-blur-md border border-white/10 rounded-full text-white font-medium tracking-wide transition-all group relative overflow-hidden"
@@ -529,8 +425,6 @@ const LandingPage = ({ onEnter }) => {
     </div>
   );
 };
-
-// --- MAIN APP ---
 
 export default function App() {
   const [messages, setMessages] = useState([]);
@@ -555,7 +449,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    ['Welcome to Luminance', 'Secrets in Light and sound', 'I am angry!', 'Calm waves...']
+    ['Welcome to Luminance', 'SECRETS IN LIGHT and ABSTRACT', 'I am angry!', 'Calm waves...']
       .forEach(txt => addMessage(txt, true, false));
   }, []);
 
