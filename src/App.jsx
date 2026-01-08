@@ -9,7 +9,6 @@ import * as THREE from 'three';
 
 // --- 1. PROCEDURAL GENERATION ENGINE ---
 
-// A seedable random number generator based on text
 const cyrb128 = (str) => {
     let h1 = 1779033703, h2 = 3144134277, h3 = 1013904242, h4 = 2773480762;
     for (let i = 0, k; i < str.length; i++) {
@@ -19,33 +18,29 @@ const cyrb128 = (str) => {
         h3 = h4 ^ Math.imul(h3 ^ k, 951274213);
         h4 = h1 ^ Math.imul(h4 ^ k, 2716044179);
     }
-    return [(h1^h2^h3^h4) >>> 0]; // Return positive integer
+    return [(h1^h2^h3^h4) >>> 0];
 };
 
 const generateSignature = (text) => {
     const seed = cyrb128(text)[0];
-    
-    // Map seed to visual parameters
-    const hue = seed % 360; // Unique Color
-    const saturation = 60 + (seed % 40); // 60-100%
-    const lightness = 40 + (seed % 30);  // 40-70%
+    const hue = seed % 360;
+    const saturation = 60 + (seed % 40);
+    const lightness = 40 + (seed % 30);
     const color = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
     
+    // Available shapes
     const shapes = ['sphere', 'icosahedron', 'octahedron', 'torusKnot', 'dodecahedron'];
     const shape = shapes[seed % shapes.length];
     
-    // Physical properties
     const roughness = (seed % 10) / 10; 
     const metalness = ((seed % 20) / 20) + 0.2;
-    const distort = ((seed % 50) / 100) + 0.1; // 0.1 to 0.6
-    
-    // Audio Frequency (Pentatonic Scale Mapping to sound musical)
+    const distort = ((seed % 50) / 100) + 0.1;
     const baseFreq = 200 + (seed % 600);
     
     return { color, shape, roughness, metalness, distort, baseFreq, seed };
 };
 
-// --- 2. AUDIO ENGINE (Updated for Unique Sounds) ---
+// --- 2. AUDIO ENGINE ---
 class SoundEngine {
   constructor() { this.ctx = null; }
   
@@ -71,12 +66,10 @@ class SoundEngine {
 
   playUnique(signature) {
     if (!this.ctx) this.init();
-    // Use the signature's unique frequency
     const types = ['sine', 'triangle', 'sawtooth', 'square'];
     const type = types[signature.seed % types.length];
     this.playTone(signature.baseFreq, type, 0.4, 0.1);
     
-    // Add a harmonic
     setTimeout(() => {
         this.playTone(signature.baseFreq * 1.5, 'sine', 0.6, 0.05);
     }, 100);
@@ -89,7 +82,7 @@ class SoundEngine {
 }
 const soundEngine = new SoundEngine();
 
-// --- 3. SCRAMBLE TEXT EFFECT (Decoder) ---
+// --- 3. SCRAMBLE TEXT EFFECT ---
 const ScrambleText = ({ text, revealed }) => {
     const [display, setDisplay] = useState("");
     const chars = "!@#$%^&*()_+-=[]{}|;:,.<>?/~";
@@ -105,10 +98,9 @@ const ScrambleText = ({ text, revealed }) => {
                 }).join(""));
                 
                 if (iteration >= text.length) clearInterval(interval);
-                iteration += 1 / 3; // Speed of decoding
+                iteration += 1 / 3;
             }, 30);
         } else {
-            // Hash view
             setDisplay(Array(Math.min(text.length, 20)).fill(0).map(() => chars[Math.floor(Math.random() * chars.length)]).join(""));
         }
         return () => clearInterval(interval);
@@ -117,14 +109,18 @@ const ScrambleText = ({ text, revealed }) => {
     return <span className="font-mono">{display}</span>;
 };
 
-// --- 4. 3D SCENE & GEOMETRY CACHE ---
+// --- 4. 3D SCENE & COMPONENTS ---
 
-const Geometries = {
-    sphere: <sphereGeometry args={[1, 64, 64]} />,
-    icosahedron: <icosahedronGeometry args={[1, 0]} />,
-    octahedron: <octahedronGeometry args={[1, 0]} />,
-    dodecahedron: <dodecahedronGeometry args={[1, 0]} />,
-    torusKnot: <torusKnotGeometry args={[0.6, 0.2, 100, 16]} />
+// FIXED: Helper component to switch geometries correctly
+const GeometrySelector = ({ type }) => {
+    switch (type) {
+        case 'sphere': return <sphereGeometry args={[1, 64, 64]} />;
+        case 'icosahedron': return <icosahedronGeometry args={[1, 0]} />;
+        case 'octahedron': return <octahedronGeometry args={[1, 0]} />;
+        case 'dodecahedron': return <dodecahedronGeometry args={[1, 0]} />;
+        case 'torusKnot': return <torusKnotGeometry args={[0.6, 0.2, 100, 16]} />;
+        default: return <sphereGeometry args={[1, 64, 64]} />;
+    }
 };
 
 const MessageOrb = ({ id, position, signature, text, onClick, isNew }) => {
@@ -132,21 +128,20 @@ const MessageOrb = ({ id, position, signature, text, onClick, isNew }) => {
     const meshRef = useRef();
     const [hovered, setHover] = useState(false);
     
-    // Travel Animation
     const startPos = useRef(new THREE.Vector3(0, 0, 40));
-    const targetPos = useMemo(() => new THREE.Vector3(...position), [position]);
+    // Ensure position is treated as a Vector3
+    const targetPos = useMemo(() => new THREE.Vector3(position[0], position[1], position[2]), [position]);
     const progress = useRef(isNew ? 0 : 1);
 
     useFrame((state, delta) => {
-        // 1. Travel Logic
+        // Animation Logic
         if (progress.current < 1) {
             progress.current += delta * 0.5;
             if (progress.current > 1) progress.current = 1;
             const ease = 1 - Math.pow(1 - progress.current, 3);
-            groupRef.current.position.lerpVectors(startPos.current, targetPos, ease);
+            if(groupRef.current) groupRef.current.position.lerpVectors(startPos.current, targetPos, ease);
         }
 
-        // 2. Rotation & Scale
         if (meshRef.current) {
             meshRef.current.rotation.x += delta * 0.2;
             meshRef.current.rotation.y += delta * 0.25;
@@ -156,13 +151,14 @@ const MessageOrb = ({ id, position, signature, text, onClick, isNew }) => {
         }
     });
 
-    const handlePointerOver = () => {
+    const handlePointerOver = (e) => {
+        e.stopPropagation();
         setHover(true);
         soundEngine.playUnique(signature);
         document.body.style.cursor = 'pointer';
     };
 
-    const handlePointerOut = () => {
+    const handlePointerOut = (e) => {
         setHover(false);
         document.body.style.cursor = 'auto';
     };
@@ -176,14 +172,16 @@ const MessageOrb = ({ id, position, signature, text, onClick, isNew }) => {
                     onPointerOver={handlePointerOver}
                     onPointerOut={handlePointerOut}
                 >
-                    {Geometries[signature.shape] || Geometries.sphere}
+                    {/* FIXED: Using the selector component instead of a global object */}
+                    <GeometrySelector type={signature.shape} />
+                    
                     <MeshDistortMaterial
                         color={signature.color}
                         distort={signature.distort}
                         speed={2}
                         roughness={signature.roughness}
                         metalness={signature.metalness}
-                        toneMapped={false} // Crucial for Bloom
+                        toneMapped={false}
                         emissive={signature.color}
                         emissiveIntensity={hovered ? 2 : 0.5}
                     />
@@ -229,13 +227,18 @@ const Typewriter = ({ text, onComplete, delay = 0 }) => {
     useEffect(() => {
         const timeout = setTimeout(() => {
             const interval = setInterval(() => {
-                setDisplayedText((prev) => prev + text.charAt(index.current));
+                setDisplayedText((prev) => {
+                    if (index.current < text.length) {
+                        return prev + text.charAt(index.current);
+                    }
+                    return prev;
+                });
                 index.current++;
                 if (index.current === text.length) {
                     clearInterval(interval);
                     if (onComplete) onComplete();
                 }
-            }, 50); // Typing speed
+            }, 50);
             return () => clearInterval(interval);
         }, delay);
         return () => clearTimeout(timeout);
@@ -263,7 +266,6 @@ const IntroScreen = ({ onComplete }) => {
                         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, scale: 1.1, filter: 'blur(10px)' }}
                         className="flex flex-col items-center text-center max-w-2xl"
                     >
-                        {/* Animated Logo */}
                         <motion.div 
                             animate={{ rotate: 360 }} transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
                             className="w-24 h-24 mb-10 rounded-full border border-white/10 relative"
@@ -317,7 +319,6 @@ const DecoderOverlay = ({ message, onClose }) => {
                         <X size={20} />
                     </button>
 
-                    {/* Header */}
                     <div className="flex items-center gap-4 mb-8">
                         <div 
                             className="w-12 h-12 rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(255,255,255,0.2)]"
@@ -331,7 +332,6 @@ const DecoderOverlay = ({ message, onClose }) => {
                         </div>
                     </div>
 
-                    {/* Message Area */}
                     <div 
                         className="min-h-[140px] flex items-center justify-center text-center p-4 border border-white/5 bg-white/5 cursor-pointer hover:bg-white/10 transition-colors mb-6 select-none"
                         onPointerDown={() => setRevealed(true)}
@@ -400,7 +400,6 @@ export default function App() {
     const [messages, setMessages] = useState([]);
     const [selectedMsg, setSelectedMsg] = useState(null);
 
-    // Initial Seeds
     useEffect(() => {
         if (started && messages.length === 0) {
             ["Secrets lie within the noise", "Luminance online", "What do you see?"].forEach(t => addMessage(t, true, false));
@@ -408,9 +407,9 @@ export default function App() {
     }, [started]);
 
     const addMessage = (text, randomPos = false, isNew = true) => {
-        const signature = generateSignature(text); // Generates UNIQUE look/sound
+        const signature = generateSignature(text);
         
-        const pos = randomPos ?
+        const pos = randomPos ? 
             [(Math.random() - 0.5) * 25, (Math.random() - 0.5) * 25, (Math.random() - 0.5) * 25] :
             [(Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8];
         
@@ -423,8 +422,8 @@ export default function App() {
             {/* Intro Screen */}
             {!started && <IntroScreen onComplete={() => setStarted(true)} />}
 
-            {/* Main Interface */}
-            <div className={`transition-opacity duration-1000 ${started ? 'opacity-100' : 'opacity-0'}`}>
+            {/* Main Interface - Controls Opacity */}
+            <div className={`w-full h-full transition-opacity duration-1000 ${started ? 'opacity-100' : 'opacity-0'}`}>
                 {/* HUD */}
                 <div className="absolute top-8 left-8 z-10 pointer-events-none select-none mix-blend-difference">
                     <h1 className="text-xl font-bold tracking-tight uppercase text-white">Luminance</h1>
